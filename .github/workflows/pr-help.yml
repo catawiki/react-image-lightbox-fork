@@ -1,0 +1,25 @@
+name: Help
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  show-help:
+    runs-on: ubuntu-latest
+    name: Show available commands
+    env:
+      CW_TOKEN: ${{ secrets.FRONTEND_BUILD_TOKEN }}
+    steps:
+      - name: Show help message
+        uses: jungwinter/comment@v1
+        with:
+          type: create
+          issue_number: ${{ github.event.number }}
+          token: ${{ env.CW_TOKEN }}
+          body: |
+            ### Useful commands:
+
+            - `/publish`: publish a development version of the package including the changes of this PR (0.0.0-hash)
+
+            ##### 🛠 Post a comment with the action to trigger the workflow 🛠

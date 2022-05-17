@@ -1,0 +1,121 @@
+name: pr-dev-package
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  commands:
+    if: |
+      github.event.issue.pull_request &&
+      (github.event.comment.body == '/publish')
+    runs-on: ubuntu-latest
+    name: Trigger command
+    env:
+      CW_TOKEN: ${{ secrets.FRONTEND_BUILD_TOKEN }}
+    steps:
+      - name: Send a reaction to say we are working on it
+        uses: dkershner6/reaction-action@v1
+        with:
+          token: ${{ env.CW_TOKEN }}
+          reaction: 'eyes'
+
+      - name: Fetch the last commit in the PR
+        id: sha
+        uses: actions/github-script@v4
+        with:
+          result-encoding: string
+          script: |
+            const { owner, repo, number } = context.issue;
+            const pr = await github.pulls.get({
+              owner,
+              repo,
+              pull_number: number,
+            });
+            return pr.data.head.sha
+
+      - name: Show what commit hash we put in the mix
+        run: echo Working on the commit hash ${{ steps.sha.outputs.result }}
+
+      - name: Checkout the repository
+        uses: actions/checkout@v2.3.4
+        with:
+          ref: ${{ steps.sha.outputs.result }}
+
+      - name: Read NodeJS version from .nvmrc
+        id: node-version
+        uses: juliangruber/read-file-action@v1
+        with:
+          path: ./.nvmrc
+          trim: true
+
+      - name: Setup NodeJS using the obtained nvm version
+        uses: actions/setup-node@v2
+        with:
+          node-version: ${{ steps.node-version.outputs.content }}
+
+      - name: Add Git user information
+        run: |
+          git config user.email "github-action@users.noreply.github.com"
+          git config user.name "GitHub Action"
+
+      - name: Authenticate with GitHub NPM registry
+        run: |
+          echo "@catawiki:registry=https://npm.pkg.github.com/" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ env.CW_TOKEN }}" >> ~/.npmrc
+
+      - name: Restore cached node_modules
+        uses: actions/cache@v2
+        with:
+          path: '**/node_modules'
+          key: ${{ runner.os }}-modules-${{ hashFiles('**/.nvmrc') }}-${{ hashFiles('**/yarn.lock') }}
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Bump to new dev version
+        if: github.event.comment.body == '/publish'
+        run: |
+          yarn version --new-version "0.0.0-${{ steps.sha.outputs.result }}" --non-interactive --frozen-lockfile
+          [[ -z $(git status -s) ]] || { echo 'Version bump failed!'; exit 1; }
+          git push --follow-tags # Push latest commit and tag
+        env:
+          GITHUB_TOKEN: ${{ env.CW_TOKEN }}
+          NPM_TOKEN: ${{ env.CW_TOKEN }}
+
+      - name: Publish package
+        run: |
+          yarn publish --registry "https://npm.pkg.github.com/catawiki"
+        env:
+          NODE_AUTH_TOKEN: ${{ env.CW_TOKEN }}
+
+      - name: Send a rocket so we know the comment is addressed
+        uses: dkershner6/reaction-action@v1
+        with:
+          token: ${{ env.CW_TOKEN }}
+          reaction: 'rocket'
+
+      - name: Put the package name into env so the next step can access it
+        run: echo "NPM_PACKAGE_NAME=@${GITHUB_REPOSITORY//cw-/}" >> $GITHUB_ENV
+
+      - name: Publish dev version - Success
+        if: github.event.comment.body == '/publish'
+        uses: jungwinter/comment@v1
+        with:
+          type: create
+          issue_number: ${{ github.event.issue.number }}
+          token: ${{ env.CW_TOKEN }}
+          body: |
+            ### 🚀 The new dev version is released and ready to use:
+            ```
+            yarn add ${{ env.NPM_PACKAGE_NAME }}@0.0.0-${{ steps.sha.outputs.result }}
+            ```
+            #### happy hacking! 🥷🏿
+          GITHUB_TOKEN: ${{ env.CW_TOKEN }}
+
+      - name: Send a thumbs down when something went wrong
+        if: ${{ failure() }}
+        uses: dkershner6/reaction-action@v1
+        with:
+          token: ${{ env.CW_TOKEN }}
+          reaction: '-1'
