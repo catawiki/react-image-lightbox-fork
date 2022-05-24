@@ -51,11 +51,14 @@ jobs:
         with:
           node-version: ${{ steps.node-version.outputs.content }}
 
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
       - name: Bump version
         run: |
           yarn version --new-version "${{ env.BUMP_TARGET }}" --non-interactive --frozen-lockfile
           [[ -z $(git status -s) ]] || { echo 'Version bump failed!'; exit 1; }
-          git push --follow-tags # Push latest commit and tag
+          git push --follow-tags  # Push latest commit and tag
 
       - name: Publish package
         run: |
